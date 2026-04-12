@@ -22,6 +22,11 @@
   margin-bottom: 1.5rem;
   padding: 0.5rem 0;
   transition: color 0.2s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .back-link:hover {
@@ -159,6 +164,51 @@
 
 .description-text p {
   margin: 0;
+}
+
+/* Платный алгоритм: покупка */
+.paywall-section .paywall-note {
+  color: #4a5568;
+  margin: 0 0 1rem 0;
+  line-height: 1.6;
+}
+
+.paywall-price {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1a202c;
+  margin-bottom: 1rem;
+}
+
+.buy-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 0.85rem 1.75rem;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.buy-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.35);
+}
+
+.buy-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.paywall-login {
+  margin-top: 0.75rem;
+}
+
+.paywall-login a {
+  color: #667eea;
+  font-weight: 600;
 }
 
 /* Code Block */

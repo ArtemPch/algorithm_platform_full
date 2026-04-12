@@ -1,14 +1,36 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../service/api';
-import { User, Algorithm } from '../types';
-import { Link } from 'react-router-dom';
+import { ModeratedAlgorithm, AlgorithmPurchaseItem } from '../types';
+import { Link, useLocation } from 'react-router-dom';
 import './Profile.css';
+
+function isRealisticEmail(email: string): boolean {
+  const v = email.trim();
+  if (!v) return false;
+  const at = v.indexOf('@');
+  if (at <= 0) return false;
+  const domain = v.slice(at + 1);
+  return domain.includes('.') && domain.length >= 3;
+}
+
+const moderationStatusLabel: Record<string, string> = {
+  pending: 'На модерации',
+  approved: 'Одобрен',
+  rejected: 'Отклонён',
+};
+
+type ProfileTab = 'info' | 'my-algorithms' | 'purchased';
 
 const Profile: React.FC = () => {
   const { user, logout, updateUser, loading: authLoading } = useAuth();
-  const [userAlgorithms, setUserAlgorithms] = useState<Algorithm[]>([]);
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState<ProfileTab>('info');
+  const [userAlgorithms, setUserAlgorithms] = useState<ModeratedAlgorithm[]>([]);
   const [algorithmsLoading, setAlgorithmsLoading] = useState(false);
+  const [purchases, setPurchases] = useState<AlgorithmPurchaseItem[]>([]);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [purchasesError, setPurchasesError] = useState('');
   const [error, setError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -30,6 +52,13 @@ const Profile: React.FC = () => {
   }, [user]);
 
   useEffect(() => {
+    const tab = (location.state as { profileTab?: ProfileTab } | null)?.profileTab;
+    if (tab === 'my-algorithms' || tab === 'purchased' || tab === 'info') {
+      setActiveTab(tab);
+    }
+  }, [location.state, location.key]);
+
+  useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
       
@@ -48,22 +77,74 @@ const Profile: React.FC = () => {
     fetchUserData();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const data = await apiService.getMyPurchases();
+        setPurchases(data);
+      } catch {
+        /* счётчик вкладки необязателен */
+      }
+    })();
+  }, [user]);
+
+  useEffect(() => {
+    const loadPurchases = async () => {
+      if (!user || activeTab !== 'purchased') return;
+      try {
+        setPurchasesLoading(true);
+        setPurchasesError('');
+        const data = await apiService.getMyPurchases();
+        setPurchases(data);
+      } catch (err) {
+        setPurchasesError('Не удалось загрузить покупки');
+        console.error(err);
+      } finally {
+        setPurchasesLoading(false);
+      }
+    };
+    loadPurchases();
+  }, [user, activeTab]);
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isRealisticEmail(editForm.email)) {
+      setError('Укажите корректный email вида name@example.com');
+      return;
+    }
     try {
       await updateUser(editForm);
       setIsEditing(false);
       setError('');
     } catch (err) {
-      setError('Ошибка обновления профиля');
+      setError(err instanceof Error ? err.message : 'Ошибка обновления профиля');
       console.error('Profile update error:', err);
     }
+  };
+
+  const cancelEditing = () => {
+    if (user) {
+      setEditForm({
+        username: user.username || '',
+        email: user.email || '',
+        first_name: user.first_name || '',
+        last_name: user.last_name || '',
+      });
+    }
+    setIsEditing(false);
+    setError('');
   };
 
   const handleLogout = () => {
     logout();
     window.location.href = '/';
   };
+
+  const rejectedAlgorithmsCount = useMemo(
+    () => userAlgorithms.filter((a) => a.status === 'rejected').length,
+    [userAlgorithms]
+  );
 
   if (authLoading) {
     return (
@@ -130,11 +211,54 @@ const Profile: React.FC = () => {
         </button>
       </div>
 
-      {error && (
+      {error && activeTab === 'info' && (
         <div className="error-message">{error}</div>
       )}
 
-      <div className="profile-content">
+      <div className="profile-tabs" role="tablist" aria-label="Разделы профиля">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'info'}
+          className={`profile-tab ${activeTab === 'info' ? 'active' : ''}`}
+          onClick={() => setActiveTab('info')}
+        >
+          Профиль
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'my-algorithms'}
+          className={`profile-tab profile-tab--with-badge ${activeTab === 'my-algorithms' ? 'active' : ''}`}
+          onClick={() => setActiveTab('my-algorithms')}
+        >
+          <span className="profile-tab-inner">
+            <span>Мои алгоритмы</span>
+            <span className="profile-tab-muted-count">({userAlgorithms.length})</span>
+            {rejectedAlgorithmsCount > 0 && (
+              <span
+                className="profile-tab-notify"
+                title={`Отклонённых алгоритмов: ${rejectedAlgorithmsCount}`}
+                aria-label={`Есть отклонённые алгоритмы: ${rejectedAlgorithmsCount}`}
+              >
+                {rejectedAlgorithmsCount}
+              </span>
+            )}
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'purchased'}
+          className={`profile-tab ${activeTab === 'purchased' ? 'active' : ''}`}
+          onClick={() => setActiveTab('purchased')}
+        >
+          Купленные ({purchases.length})
+        </button>
+      </div>
+
+      <div className="profile-content profile-content--tabs">
+        {activeTab === 'info' && (
         <div className="profile-info-section">
           <h2>Информация профиля</h2>
           
@@ -185,6 +309,10 @@ const Profile: React.FC = () => {
                   type="email"
                   value={editForm.email}
                   onChange={(e) => setEditForm({...editForm, email: e.target.value})}
+                  required
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  title="Формат: имя@домен.зона"
                 />
               </div>
 
@@ -213,7 +341,7 @@ const Profile: React.FC = () => {
                 <button 
                   type="button" 
                   className="cancel-btn"
-                  onClick={() => setIsEditing(false)}
+                  onClick={cancelEditing}
                 >
                   Отмена
                 </button>
@@ -221,7 +349,9 @@ const Profile: React.FC = () => {
             </form>
           )}
         </div>
+        )}
 
+        {activeTab === 'my-algorithms' && (
         <div className="algorithms-section">
           <h2>Мои алгоритмы ({userAlgorithms.length})</h2>
           
@@ -234,20 +364,118 @@ const Profile: React.FC = () => {
           ) : (
             <div className="algorithms-list">
               {userAlgorithms.map((algorithm) => (
-                <div key={algorithm.id} className="algorithm-card">
+                <div
+                  key={algorithm.id}
+                  className={`algorithm-card ${algorithm.status === 'rejected' ? 'algorithm-card--rejected' : ''}`}
+                >
                   <h3>{algorithm.title}</h3>
                   <p>{algorithm.description}</p>
-                  <div className="algorithm-meta">
-                    <span className={`status ${algorithm.isPaid ? 'paid' : 'free'}`}>
+                  <div className="algorithm-meta" role="list">
+                    <span
+                      role="listitem"
+                      className={`mod-status mod-status--${algorithm.status}`}
+                    >
+                      {moderationStatusLabel[algorithm.status] ?? algorithm.status}
+                    </span>
+                    <span
+                      role="listitem"
+                      className={`price-type ${algorithm.isPaid ? 'paid' : 'free'}`}
+                    >
                       {algorithm.isPaid ? 'Платный' : 'Бесплатный'}
                     </span>
-                    <span className="language">{algorithm.language}</span>
+                    <span role="listitem" className="language">
+                      {algorithm.language}
+                    </span>
+                  </div>
+                  {algorithm.status === 'rejected' && (
+                    <div className="rejection-notice" role="status">
+                      <span className="rejection-notice__label">Почему отклонён</span>
+                      <p className="rejection-notice__text">
+                        {algorithm.rejection_reason?.trim()
+                          ? algorithm.rejection_reason.trim()
+                          : 'Модератор не оставил пояснения. Отредактируйте алгоритм и отправьте снова или свяжитесь с поддержкой.'}
+                      </p>
+                    </div>
+                  )}
+                  <div className="algorithm-card-actions">
+                    <Link to={`/algorithm/${algorithm.id}`} className="algo-action-link">
+                      Открыть
+                    </Link>
+                    <Link to={`/edit-algorithm/${algorithm.id}`} className="algo-action-link algo-action-link--primary">
+                      Изменить
+                    </Link>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
+        )}
+
+        {activeTab === 'purchased' && (
+        <div className="algorithms-section purchased-algorithms-section">
+          <h2>Купленные алгоритмы ({purchases.length})</h2>
+          {purchasesError && <div className="error-message">{purchasesError}</div>}
+          {purchasesLoading ? (
+            <div className="loading">Загрузка…</div>
+          ) : purchases.length === 0 ? (
+            <div className="no-algorithms">
+              У вас пока нет купленных алгоритмов. Платные решения можно купить на странице алгоритма.
+            </div>
+          ) : (
+            <div className="algorithms-list">
+              {purchases.map((item) => (
+                <div key={item.id} className="algorithm-card">
+                  <h3>{item.algorithm.title}</h3>
+                  <p>{item.algorithm.description}</p>
+                  <dl className="purchased-details">
+                    <div>
+                      <dt>Дата и время покупки</dt>
+                      <dd>
+                        {new Date(item.purchasedAt).toLocaleString('ru-RU', {
+                          weekday: 'long',
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Оплачено</dt>
+                      <dd>
+                        <strong>{item.purchasePrice} ₽</strong>
+                      </dd>
+                    </div>
+                    {item.algorithm.isPaid && (
+                      <div>
+                        <dt>Текущая цена на площадке</dt>
+                        <dd>
+                          {item.algorithm.price != null ? `${item.algorithm.price} ₽` : '—'}
+                          {item.algorithm.price != null &&
+                            item.purchasePrice > 0 &&
+                            item.algorithm.price !== item.purchasePrice && (
+                              <span className="purchased-price-delta">
+                                {item.algorithm.price > item.purchasePrice ? ' (↑ дороже)' : ' (↓ дешевле)'}
+                              </span>
+                            )}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                  <div className="algorithm-card-actions">
+                    <Link to={`/algorithm/${item.algorithm.id}`} className="algo-action-link algo-action-link--primary">
+                      Открыть и смотреть код
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        )}
       </div>
     </div>
   );

@@ -5,8 +5,10 @@ export interface Algorithm {
   author: string;
   tags: string[];
   isPaid: boolean;
-  price?: number; 
+  price?: number;
   code?: string;
+  /** С сервера: виден ли код текущему пользователю */
+  codeVisible?: boolean;
   language: string;
   compiler: string;
   createdAt: string;
@@ -52,4 +54,17 @@ export interface ModeratedAlgorithm extends Algorithm {
 export interface ModerationRequest {
   status: 'approved' | 'rejected';
   rejection_reason?: string;
+}
+
+export interface AlgorithmPurchaseItem {
+  id: number;
+  purchasedAt: string;
+  /** Цена на момент покупки, ₽ */
+  purchasePrice: number;
+  algorithm: ModeratedAlgorithm;
+}
+
+export interface PriceHistoryPoint {
+  recordedAt: string;
+  price: number;
 }

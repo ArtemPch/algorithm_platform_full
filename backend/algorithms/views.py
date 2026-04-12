@@ -2,8 +2,9 @@ from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Algorithm
+from .models import Algorithm, AlgorithmPurchase, AlgorithmPricePoint
 from .serializers import AlgorithmSerializer
 
 class IsModerator(permissions.BasePermission):
@@ -79,6 +80,54 @@ class AlgorithmDetail(generics.RetrieveUpdateDestroyAPIView):
         if not algorithm.can_edit(request.user):
             return Response({'detail': 'У вас нет прав для удаления этого алгоритма.'}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def purchase_algorithm(request, pk):
+    """
+    Заглушка оплаты: при успешном запросе фиксируем покупку и возвращаем алгоритм с кодом.
+    """
+    algorithm = get_object_or_404(Algorithm, pk=pk)
+    if not algorithm.can_view(request.user):
+        return Response({'detail': 'Алгоритм недоступен.'}, status=status.HTTP_404_NOT_FOUND)
+    if algorithm.status != Algorithm.STATUS_APPROVED:
+        return Response({'detail': 'Можно купить только одобренный алгоритм.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not algorithm.is_paid:
+        return Response({'detail': 'Этот алгоритм бесплатный, покупка не требуется.'}, status=status.HTTP_400_BAD_REQUEST)
+    if algorithm.author_name == request.user.username:
+        return Response({'detail': 'Нельзя купить собственный алгоритм.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    price = int(algorithm.price or 0)
+    purchase, created = AlgorithmPurchase.objects.get_or_create(
+        user=request.user,
+        algorithm=algorithm,
+        defaults={'purchase_price': price},
+    )
+    if not created and purchase.purchase_price == 0 and price:
+        purchase.purchase_price = price
+        purchase.save(update_fields=['purchase_price'])
+
+    serializer = AlgorithmSerializer(algorithm, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def algorithm_price_history(request, pk):
+    """
+    История цены платного алгоритма (для графика). Доступ как у карточки алгоритма.
+    """
+    algorithm = get_object_or_404(Algorithm, pk=pk)
+    if not algorithm.can_view(request.user):
+        return Response({'detail': 'Алгоритм не найден.'}, status=status.HTTP_404_NOT_FOUND)
+    if not algorithm.is_paid:
+        return Response([])
+    points = AlgorithmPricePoint.objects.filter(algorithm=algorithm).order_by('recorded_at')
+    return Response(
+        [{'recorded_at': p.recorded_at.isoformat(), 'price': p.price} for p in points]
+    )
+
 
 @api_view(['GET'])
 @permission_classes([IsModerator])

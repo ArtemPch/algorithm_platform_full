@@ -9,6 +9,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import AlgorithmDetails from './pages/AlgorithmDetails';
 import Moderation from './pages/Moderation';
+import ToastHost from './components/ToastHost';
 
 // Компонент для защищенных маршрутов
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -281,6 +282,20 @@ function AppContent() {
               </motion.div>
             </ProtectedRoute>
           } />
+
+          <Route path="/edit-algorithm/:id" element={
+            <ProtectedRoute>
+              <motion.div
+                key="edit-algorithm"
+                initial="initial"
+                animate="in"
+                exit="out"
+                variants={pageVariants}
+              >
+                <AddAlgorithm />
+              </motion.div>
+            </ProtectedRoute>
+          } />
           
           <Route path="/profile" element={
             <ProtectedRoute>
@@ -348,6 +363,7 @@ function AppContent() {
           } />
         </Routes>
       </AnimatePresence>
+      <ToastHost />
     </>
   );
 }
