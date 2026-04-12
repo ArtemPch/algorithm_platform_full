@@ -2,9 +2,9 @@ from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
-from algorithms.models import Algorithm
-from algorithms.serializers import AlgorithmSerializer
-from .serializers import UserSerializer, RegisterSerializer
+from algorithms.models import Algorithm, AlgorithmPurchase
+from algorithms.serializers import AlgorithmSerializer, AlgorithmPurchaseSerializer
+from .serializers import UserSerializer, UserProfileUpdateSerializer, RegisterSerializer
 
 User = get_user_model()
 
@@ -31,16 +31,44 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
-@api_view(['GET'])
+@api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([permissions.IsAuthenticated])
 def current_user(request):
     """
-    Возвращает данные текущего аутентифицированного пользователя.
+    GET: данные текущего пользователя.
+    PUT/PATCH: обновление профиля (email, имя, фамилия, логин).
     """
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+    if request.method == 'GET':
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+
+    partial = request.method == 'PATCH'
+    serializer = UserProfileUpdateSerializer(
+        request.user,
+        data=request.data,
+        partial=partial,
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    request.user.refresh_from_db()
+    return Response(UserSerializer(request.user).data)
+
 
 @api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def my_purchases(request):
+    """Список купленных алгоритмов текущего пользователя (с кодом)."""
+    qs = (
+        AlgorithmPurchase.objects.filter(user=request.user)
+        .select_related('algorithm')
+        .order_by('-purchased_at')
+    )
+    serializer = AlgorithmPurchaseSerializer(qs, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
 def user_algorithms(request, username):
     """
     Возвращает алгоритмы указанного пользователя.

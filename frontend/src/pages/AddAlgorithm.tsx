@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import CodeMirror from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -6,7 +7,12 @@ import { apiService } from '../service/api';
 import { Algorithm } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
+const SERVICE_FEE_RUB = 100;
+
 const AddAlgorithm: React.FC = () => {
+  const { id: editId } = useParams<{ id: string }>();
+  const isEditMode = Boolean(editId);
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [formData, setFormData] = useState({
     title: '',
@@ -14,15 +20,55 @@ const AddAlgorithm: React.FC = () => {
     code: '#include <iostream>\n#include <vector>\n\nusing namespace std;\n\n// Ваш алгоритм здесь\nvoid yourAlgorithm() {\n    // Реализация алгоритма\n    cout << "Hello, Algorithm Platform!" << endl;\n}',
     tags: '',
     isPaid: false,
-    price: '100',
+    price: '200',
     language: 'C++',
     compiler: 'g++',
   });
 
   const [showPrice, setShowPrice] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadExisting, setLoadExisting] = useState(isEditMode);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!isEditMode || !editId || !user?.username) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadExisting(true);
+        setInitialLoadError(null);
+        const existing = await apiService.getAlgorithmById(editId);
+        if (cancelled) return;
+        if (existing.author !== user.username && existing.author_name !== user.username) {
+          setInitialLoadError('Вы можете редактировать только свои алгоритмы.');
+          return;
+        }
+        setFormData({
+          title: existing.title,
+          description: existing.description,
+          code: existing.code ?? '',
+          tags: existing.tags?.length ? existing.tags.join(', ') : '',
+          isPaid: existing.isPaid,
+          price: String(existing.price ?? (existing.isPaid ? 200 : 0)),
+          language: existing.language || 'C++',
+          compiler: existing.compiler || 'g++',
+        });
+        setShowPrice(existing.isPaid);
+      } catch (err) {
+        if (!cancelled) {
+          setInitialLoadError(err instanceof Error ? err.message : 'Не удалось загрузить алгоритм');
+        }
+      } finally {
+        if (!cancelled) setLoadExisting(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, editId, user?.username]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,9 +76,17 @@ const AddAlgorithm: React.FC = () => {
       setError('Войдите в аккаунт, чтобы добавить алгоритм.');
       return;
     }
+    if (formData.isPaid) {
+      const salePrice = Number(formData.price);
+      if (!Number.isFinite(salePrice) || salePrice < 101) {
+        setError(
+          `Для платного алгоритма цена должна быть не меньше 101 ₽ (после комиссии ${SERVICE_FEE_RUB} ₽ вы получите хотя бы 1 ₽ с продажи).`
+        );
+        return;
+      }
+    }
     setLoading(true);
     setError(null);
-    setSuccess(false);
 
     try {
       // Преобразуем теги из строки в массив
@@ -51,26 +105,30 @@ const AddAlgorithm: React.FC = () => {
         author: user.username,
       };
 
-      console.log('Отправка данных:', algorithmData);
-      
-      // Отправляем на бэкенд
-      const createdAlgorithm = await apiService.createAlgorithm(algorithmData);
-      
-      console.log('Алгоритм создан:', createdAlgorithm);
-      setSuccess(true);
-      
-      // Сбрасываем форму после успешного добавления
-      setFormData({
-        title: '',
-        description: '',
-        code: '#include <iostream>\n#include <vector>\n\nusing namespace std;\n\n// Ваш алгоритм здесь\nvoid yourAlgorithm() {\n    // Реализация алгоритма\n    cout << "Hello, Algorithm Platform!" << endl;\n}',
-        tags: '',
-        isPaid: false,
-        price: '100',
-        language: 'C++',
-        compiler: 'g++',
-      });
-      setShowPrice(false);
+      if (isEditMode && editId) {
+        await apiService.updateAlgorithm(editId, algorithmData);
+        navigate('/profile', {
+          replace: true,
+          state: {
+            profileTab: 'my-algorithms' as const,
+            toast: {
+              title: 'Сохранено',
+              message: 'Изменения записаны. Алгоритм снова отправлен на модерацию.',
+            },
+          },
+        });
+      } else {
+        await apiService.createAlgorithm(algorithmData);
+        navigate('/', {
+          replace: true,
+          state: {
+            toast: {
+              title: 'Отправлено',
+              message: 'Алгоритм отправлен на модерацию. Скоро он появится в поиске после проверки.',
+            },
+          },
+        });
+      }
 
     } catch (err) {
       console.error('Ошибка при создании алгоритма:', err);
@@ -101,7 +159,7 @@ const AddAlgorithm: React.FC = () => {
     setFormData(prev => ({
       ...prev,
       isPaid: newIsPaid,
-      price: newIsPaid ? '100' : '0'
+      price: newIsPaid ? '200' : '0'
     }));
     
     if (newIsPaid) {
@@ -111,19 +169,43 @@ const AddAlgorithm: React.FC = () => {
     }
   };
 
+  const salePriceNum = Number(formData.price);
+  const authorNetRub =
+    formData.isPaid && Number.isFinite(salePriceNum)
+      ? Math.max(0, Math.round(salePriceNum) - SERVICE_FEE_RUB)
+      : 0;
+
+  if (loadExisting) {
+    return (
+      <div className="add-algorithm-page">
+        <p>Загрузка алгоритма…</p>
+      </div>
+    );
+  }
+
+  if (isEditMode && initialLoadError) {
+    return (
+      <div className="add-algorithm-page">
+        <div className="error-message">{initialLoadError}</div>
+        <p>
+          <Link to="/profile">← Назад к профилю</Link>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="add-algorithm-page">
-      <h1>Добавить новый алгоритм</h1>
-      
+      <h1>{isEditMode ? 'Редактировать алгоритм' : 'Добавить новый алгоритм'}</h1>
+      {isEditMode && (
+        <p style={{ marginBottom: '1rem' }}>
+          <Link to="/profile">← Назад к профилю</Link>
+        </p>
+      )}
+
       {error && (
         <div className="error-message">
           <strong>Ошибка:</strong> {error}
-        </div>
-      )}
-      
-      {success && (
-        <div className="success-message">
-          ✅ Алгоритм успешно отправлен на модерацию!
         </div>
       )}
 
@@ -241,6 +323,29 @@ const AddAlgorithm: React.FC = () => {
                 <span className="toggle-slider"></span>
               </label>
             </div>
+
+            {formData.isPaid && (
+              <div className="paid-commission-banner" role="note">
+                <div className="paid-commission-banner__accent" aria-hidden="true" />
+                <div className="paid-commission-banner__body">
+                  <p className="paid-commission-banner__title">Комиссия сервиса</p>
+                  <p className="paid-commission-banner__text">
+                    С каждой успешной продажи удерживается фиксированная комиссия{' '}
+                    <strong>{SERVICE_FEE_RUB} ₽</strong>. Итоговая сумма переводится вам после вычета
+                    этой комиссии.
+                  </p>
+                  <div className="paid-commission-banner__net">
+                    <span className="paid-commission-banner__net-label">Вы получите с одной продажи</span>
+                    <span className="paid-commission-banner__net-value">{authorNetRub} ₽</span>
+                  </div>
+                  {authorNetRub <= 0 && (
+                    <p className="paid-commission-banner__warn">
+                      Укажите цену выше {SERVICE_FEE_RUB} ₽, иначе выплата автору будет нулевой.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
             
             <div className={`price-input-wrapper ${showPrice ? 'visible' : 'hidden'}`}>
               <div className="price-input-container">
@@ -252,15 +357,15 @@ const AddAlgorithm: React.FC = () => {
                     name="price"
                     value={formData.price}
                     onChange={handleChange}
-                    min="1"
+                    min="101"
                     max="10000"
-                    placeholder="100"
+                    placeholder="200"
                     className="price-input"
                     disabled={!formData.isPaid}
                   />
                   <span className="currency">руб.</span>
                 </div>
-                <p className="price-hint">Укажите стоимость в рублях</p>
+                <p className="price-hint">Цена для покупателя, не ниже 101 ₽ (с учётом комиссии {SERVICE_FEE_RUB} ₽)</p>
               </div>
             </div>
           </div>
@@ -271,7 +376,7 @@ const AddAlgorithm: React.FC = () => {
           className="submit-btn"
           disabled={loading}
         >
-          {loading ? 'Отправка...' : 'Отправить на проверку'}
+          {loading ? 'Сохранение...' : isEditMode ? 'Сохранить изменения' : 'Отправить на проверку'}
         </button>
       </form>
 
@@ -283,15 +388,6 @@ const AddAlgorithm: React.FC = () => {
           border-radius: 4px;
           margin-bottom: 20px;
           border: 1px solid #f5c6cb;
-        }
-
-        .success-message {
-          background-color: #d4edda;
-          color: #155724;
-          padding: 12px;
-          border-radius: 4px;
-          margin-bottom: 20px;
-          border: 1px solid #c3e6cb;
         }
 
         .submit-btn:disabled {

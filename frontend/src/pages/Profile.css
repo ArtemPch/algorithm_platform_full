@@ -42,10 +42,123 @@
   border: 1px solid #ffcdd2;
 }
 
+.profile-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.25rem;
+  background: #eef2f7;
+  border-radius: 12px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.profile-tab {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.profile-tab--with-badge {
+  position: relative;
+}
+
+.profile-tab-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.profile-tab-muted-count {
+  font-weight: 500;
+  color: #94a3b8;
+  font-size: 0.88em;
+}
+
+.profile-tab-notify {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  margin-left: 0.15rem;
+  border-radius: 999px;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(231, 76, 60, 0.45);
+}
+
+.profile-tab:hover {
+  color: #2c3e50;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.profile-tab.active {
+  background: white;
+  color: #3498db;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
 .profile-content {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3rem;
+}
+
+.profile-content--tabs {
+  grid-template-columns: 1fr;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.purchased-details {
+  margin: 0 0 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.purchased-details > div {
+  margin: 0;
+}
+
+.purchased-details dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+}
+
+.purchased-details dd {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+.purchased-price-delta {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 500;
 }
 
 .profile-info-section,
@@ -189,6 +302,10 @@
   border-left: 4px solid #3498db;
 }
 
+.algorithm-card--rejected {
+  border-left-color: #e74c3c;
+}
+
 .algorithm-card h3 {
   margin: 0 0 0.5rem 0;
   color: #2c3e50;
@@ -202,24 +319,117 @@
 
 .algorithm-meta {
   display: flex;
-  gap: 1rem;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  margin-bottom: 0.25rem;
+  scrollbar-width: thin;
 }
 
-.status {
+.algorithm-meta > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.rejection-notice {
+  margin: 0.75rem 0 0 0;
+  padding: 0.65rem 0.85rem;
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  border-left: 3px solid #e74c3c;
+}
+
+.rejection-notice__label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #c0392b;
+  margin-bottom: 0.35rem;
+}
+
+.rejection-notice__text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #4a1d1d;
+}
+
+.mod-status {
   padding: 0.25rem 0.75rem;
   border-radius: 20px;
   font-size: 0.875rem;
   font-weight: 600;
 }
 
-.status.free {
+.mod-status--pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.mod-status--approved {
+  background: #d4edda;
+  color: #155724;
+}
+
+.mod-status--rejected {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.price-type {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.price-type.free {
   background: #d5f4e6;
   color: #27ae60;
 }
 
-.status.paid {
+.price-type.paid {
   background: #ffeaa7;
   color: #f39c12;
+}
+
+.algorithm-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.algo-action-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: #2c3e50;
+  background: #ecf0f1;
+  transition: background 0.2s;
+}
+
+.algo-action-link:hover {
+  background: #dfe6e9;
+}
+
+.algo-action-link--primary {
+  background: #3498db;
+  color: white;
+}
+
+.algo-action-link--primary:hover {
+  background: #2980b9;
 }
 
 .language {

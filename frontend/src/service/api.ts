@@ -1,4 +1,4 @@
-import { Algorithm, User, AuthResponse, LoginData, RegisterData, ModeratedAlgorithm, ModerationRequest } from '../types';
+import { Algorithm, User, AuthResponse, LoginData, RegisterData, ModeratedAlgorithm, ModerationRequest, AlgorithmPurchaseItem, PriceHistoryPoint } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -19,6 +19,7 @@ export interface ApiAlgorithm {
   rejection_reason?: string;
   moderated_by?: string;
   moderated_at?: string;
+  code_visible?: boolean;
 }
 
 class ApiService {
@@ -26,6 +27,28 @@ class ApiService {
     // Привязываем контекст методов
     this.transformAlgorithm = this.transformAlgorithm.bind(this);
     this.transformModeratedAlgorithm = this.transformModeratedAlgorithm.bind(this);
+  }
+
+  private formatApiError(data: unknown, status: number): string {
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      if ('detail' in obj && obj.detail !== undefined) {
+        const d = obj.detail;
+        if (typeof d === 'string') return d;
+        if (Array.isArray(d)) return d.map(String).join(', ');
+      }
+      const parts: string[] = [];
+      for (const [key, val] of Object.entries(obj)) {
+        if (key === 'detail') continue;
+        if (Array.isArray(val)) {
+          val.forEach((m) => parts.push(`${key}: ${m}`));
+        } else if (val != null) {
+          parts.push(`${key}: ${val}`);
+        }
+      }
+      if (parts.length) return parts.join('; ');
+    }
+    return `HTTP error ${status}`;
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -51,9 +74,9 @@ class ApiService {
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
         }
-        
-        const errorData = await response.json().catch(() => ({ detail: 'Network error' }));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+
+        const errorData = await response.json().catch(() => null);
+        throw new Error(this.formatApiError(errorData, response.status));
       }
 
       return await response.json();
@@ -189,9 +212,15 @@ class ApiService {
   }
 
   async updateUser(userData: Partial<User>): Promise<User> {
+    const payload = {
+      username: userData.username,
+      email: userData.email,
+      first_name: userData.first_name ?? '',
+      last_name: userData.last_name ?? '',
+    };
     const updatedUser = await this.request<any>('/users/me/', {
-      method: 'PUT',
-      body: JSON.stringify(userData),
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     });
     
     return {
@@ -237,6 +266,36 @@ class ApiService {
     }
   }
 
+  async purchaseAlgorithm(id: string): Promise<ModeratedAlgorithm> {
+    const algorithm: ApiAlgorithm = await this.request<ApiAlgorithm>(`/algorithms/${id}/purchase/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return this.transformModeratedAlgorithm(algorithm);
+  }
+
+  async getMyPurchases(): Promise<AlgorithmPurchaseItem[]> {
+    const rows = await this.request<any[]>('/users/me/purchases/');
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row) => ({
+      id: row.id,
+      purchasedAt: row.purchased_at,
+      purchasePrice: Number(row.purchase_price ?? 0),
+      algorithm: this.transformModeratedAlgorithm(row.algorithm),
+    }));
+  }
+
+  async getAlgorithmPriceHistory(id: string): Promise<PriceHistoryPoint[]> {
+    const rows = await this.request<{ recorded_at: string; price: number }[]>(
+      `/algorithms/${id}/price-history/`
+    );
+    if (!Array.isArray(rows)) return [];
+    return rows.map((r) => ({
+      recordedAt: r.recorded_at,
+      price: r.price,
+    }));
+  }
+
   async createAlgorithm(algorithmData: Partial<Algorithm>): Promise<Algorithm> {
     try {
       const apiAlgorithm = await this.request<ApiAlgorithm>('/algorithms/', {
@@ -248,6 +307,14 @@ class ApiService {
       console.error('Failed to create algorithm:', error);
       throw error;
     }
+  }
+
+  async updateAlgorithm(id: string, algorithmData: Partial<Algorithm>): Promise<Algorithm> {
+    const apiAlgorithm = await this.request<ApiAlgorithm>(`/algorithms/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(this.prepareAlgorithmData(algorithmData)),
+    });
+    return this.transformAlgorithm(apiAlgorithm);
   }
 
   // Методы для модерации
@@ -309,15 +376,21 @@ class ApiService {
   }
 
   private transformAlgorithm(apiAlgorithm: ApiAlgorithm): Algorithm {
+    const isPaid = Boolean(apiAlgorithm.is_paid);
+    const codeVisible =
+      apiAlgorithm.code_visible !== undefined
+        ? Boolean(apiAlgorithm.code_visible)
+        : !isPaid;
     return {
       id: apiAlgorithm.id.toString(),
       title: apiAlgorithm.name,
       description: apiAlgorithm.description,
       author: apiAlgorithm.author_name,
       tags: apiAlgorithm.tegs ? apiAlgorithm.tegs.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
-      isPaid: apiAlgorithm.is_paid,
+      isPaid,
       price: apiAlgorithm.price,
       code: apiAlgorithm.code,
+      codeVisible,
       language: apiAlgorithm.language,
       compiler: apiAlgorithm.compiler,
       createdAt: apiAlgorithm.created_at,
@@ -338,16 +411,17 @@ class ApiService {
   }
 
   private prepareAlgorithmData(algorithm: Partial<Algorithm>): any {
+    const isPaid = Boolean(algorithm.isPaid);
     return {
       name: algorithm.title,
       description: algorithm.description,
       ...(algorithm.author ? { author_name: algorithm.author } : {}),
       tegs: algorithm.tags ? algorithm.tags.join(', ') : '',
-      is_paid: algorithm.isPaid,
-      price: algorithm.price,
+      is_paid: isPaid,
+      price: isPaid ? algorithm.price ?? 0 : 0,
       code: algorithm.code,
-      language: algorithm.language,
-      compiler: algorithm.compiler,
+      language: algorithm.language ?? 'C++',
+      compiler: algorithm.compiler ?? 'g++',
     };
   }
 }

@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { apiService } from '../service/api';
-import { Algorithm } from '../types';
+import { ModeratedAlgorithm } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import PriceMonitorPanel from '../components/PriceMonitorPanel';
 import './AlgorithmDetails.css';
 
 const AlgorithmDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [algorithm, setAlgorithm] = useState<Algorithm | null>(null);
+  const { user } = useAuth();
+  const [algorithm, setAlgorithm] = useState<ModeratedAlgorithm | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [priceChartNonce, setPriceChartNonce] = useState(0);
 
   useEffect(() => {
     const fetchAlgorithm = async () => {
@@ -29,7 +35,22 @@ const AlgorithmDetails: React.FC = () => {
     };
 
     fetchAlgorithm();
-  }, [id]);
+  }, [id, user?.username]);
+
+  const handlePurchase = async () => {
+    if (!id || !user) return;
+    setPurchaseLoading(true);
+    setPurchaseError(null);
+    try {
+      const updated = await apiService.purchaseAlgorithm(id);
+      setAlgorithm(updated);
+      setPriceChartNonce((n) => n + 1);
+    } catch (err) {
+      setPurchaseError(err instanceof Error ? err.message : 'Не удалось оформить покупку');
+    } finally {
+      setPurchaseLoading(false);
+    }
+  };
 
   const handleCopyCode = async () => {
     if (!algorithm?.code) return;
@@ -68,13 +89,21 @@ const AlgorithmDetails: React.FC = () => {
     );
   }
 
+  const canViewCode = !algorithm.isPaid || Boolean(algorithm.codeVisible);
+  const showCodeBlock = canViewCode && Boolean(algorithm.code?.trim());
+  const showPaywall = algorithm.isPaid && !canViewCode;
+
   return (
     <div className="algorithm-details">
       <div className="details-header">
-        <Link to="/" className="back-link">
+        <button
+          type="button"
+          className="back-link"
+          onClick={() => navigate(-1)}
+        >
           <span className="back-arrow">←</span>
-          Назад к поиску
-        </Link>
+          Назад
+        </button>
         <h1 className="algorithm-title">{algorithm.title}</h1>
         <div className="algorithm-meta">
           <div className="meta-badges">
@@ -107,7 +136,47 @@ const AlgorithmDetails: React.FC = () => {
             </div>
           </section>
 
-          {algorithm.code && (
+          {algorithm.isPaid && (
+            <PriceMonitorPanel
+              key={`${algorithm.id}-${priceChartNonce}-${algorithm.updatedAt}`}
+              algorithmId={algorithm.id}
+              currentPrice={algorithm.price}
+            />
+          )}
+
+          {showPaywall && (
+            <section className="content-section paywall-section">
+              <h2 className="section-title">Код алгоритма</h2>
+              <p className="paywall-note">
+                Исходный код этого алгоритма доступен после покупки. Оплата сейчас имитируется: при нажатии
+                «Купить» доступ открывается сразу.
+              </p>
+              {algorithm.price != null && (
+                <p className="paywall-price">{algorithm.price} ₽</p>
+              )}
+              {purchaseError && (
+                <div className="error-inline" style={{ color: '#c0392b', marginBottom: '0.75rem' }}>
+                  {purchaseError}
+                </div>
+              )}
+              {user ? (
+                <button
+                  type="button"
+                  className="buy-btn"
+                  onClick={handlePurchase}
+                  disabled={purchaseLoading}
+                >
+                  {purchaseLoading ? 'Обработка…' : `Купить за ${algorithm.price ?? '—'} ₽`}
+                </button>
+              ) : (
+                <p className="paywall-login">
+                  <Link to="/login">Войдите</Link>, чтобы купить алгоритм.
+                </p>
+              )}
+            </section>
+          )}
+
+          {showCodeBlock && (
             <section className="content-section">
               <div className="section-header">
                 <h2 className="section-title">Код алгоритма</h2>

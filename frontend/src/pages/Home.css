@@ -3,6 +3,8 @@
   min-height: 100vh;
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
   width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 /* Hero Section */
@@ -31,10 +33,13 @@
 }
 
 .hero-content {
-  max-width: 1200px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   position: relative;
   z-index: 2;
+  padding: 0 clamp(0.75rem, 2vw, 2rem);
+  box-sizing: border-box;
 }
 
 .hero-title {
@@ -130,8 +135,10 @@
 
 /* Main Content */
 .main-content {
-  padding: 0 1rem 4rem;
+  padding: 0 clamp(0.75rem, 2vw, 2rem) 4rem;
   width: 100%;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 /* Error Banner */
@@ -142,9 +149,9 @@
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: 0 2px 8px rgba(220, 38, 38, 0.1);
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .error-content {
@@ -199,9 +206,9 @@
     0 0 0 1px rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.8);
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .filter-group {
@@ -507,9 +514,9 @@
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.8);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .empty-icon {
@@ -698,10 +705,11 @@
   }
 }
 
-/* Контейнеры с ограничением по ширине только для контента */
+/* Контейнер на всю доступную ширину */
 .content-container {
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
   width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+  box-sizing: border-box;
 }
