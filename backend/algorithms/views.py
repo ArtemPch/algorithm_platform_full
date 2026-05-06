@@ -9,6 +9,10 @@ from .serializers import AlgorithmSerializer
 from .compile_service import run_code
 from users.services.roles import is_moderator
 
+MAX_REQUEST_CODE_CHARS = 50000
+MAX_REQUEST_STDIN_CHARS = 10000
+
+
 class IsModerator(permissions.BasePermission):
     """
     Разрешение: только модераторы (staff/superuser или в группе модераторов).
@@ -182,6 +186,17 @@ def run_algorithm(request, pk):
     code = request.data.get('code') if request.data.get('code') is not None else algorithm.code
 
     stdin = request.data.get('stdin') or ""
+    if len(code or "") > MAX_REQUEST_CODE_CHARS:
+        return Response(
+            {'detail': f'Код слишком большой. Максимум {MAX_REQUEST_CODE_CHARS} символов.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(stdin or "") > MAX_REQUEST_STDIN_CHARS:
+        return Response(
+            {'detail': f'Слишком большой stdin. Максимум {MAX_REQUEST_STDIN_CHARS} символов.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     compiler = request.data.get('compiler') or algorithm.compiler or None
 
     # лимиты можно переопределять из запроса (для тестов/локальной отладки),
@@ -235,6 +250,17 @@ def run_snippet(request):
         )
     stdin = request.data.get('stdin') or ""
     compiler = request.data.get('compiler') or None
+
+    if len(code or "") > MAX_REQUEST_CODE_CHARS:
+        return Response(
+            {'detail': f'Код слишком большой. Максимум {MAX_REQUEST_CODE_CHARS} символов.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(stdin or "") > MAX_REQUEST_STDIN_CHARS:
+        return Response(
+            {'detail': f'Слишком большой stdin. Максимум {MAX_REQUEST_STDIN_CHARS} символов.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     def _clamp_int(val, default, lo, hi):
         try:

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +24,41 @@ class RunResult:
     command: list[str]
 
 
+MAX_SOURCE_CHARS = int(os.environ.get("ALGO_MAX_SOURCE_CHARS", "50000"))
+MAX_STDIN_CHARS = int(os.environ.get("ALGO_MAX_STDIN_CHARS", "10000"))
+MAX_OUTPUT_CHARS = int(os.environ.get("ALGO_MAX_OUTPUT_CHARS", "20000"))
+
+_BLOCKED_PATTERNS: dict[str, list[str]] = {
+    "python": [
+        r"\bimport\s+subprocess\b",
+        r"\bfrom\s+subprocess\s+import\b",
+        r"\bimport\s+socket\b",
+        r"\bfrom\s+socket\s+import\b",
+        r"\bimport\s+ctypes\b",
+        r"\bfrom\s+ctypes\s+import\b",
+        r"\bos\.system\s*\(",
+    ],
+    "js": [
+        r"\brequire\s*\(\s*['\"]child_process['\"]\s*\)",
+        r"\bimport\s+.*\s+from\s+['\"]child_process['\"]",
+        r"\brequire\s*\(\s*['\"]net['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"]http['\"]\s*\)",
+        r"\brequire\s*\(\s*['\"]https['\"]\s*\)",
+    ],
+    "java": [
+        r"\bRuntime\.getRuntime\s*\(",
+        r"\bProcessBuilder\s*\(",
+        r"\bjava\.net\.",
+        r"\bjava\.nio\.file\.",
+    ],
+    "cpp": [
+        r"\b(system|popen|fork|execv|execl|execlp|execvp|CreateProcess)\s*\(",
+        r"#\s*include\s*<\s*winsock2\.h\s*>",
+        r"#\s*include\s*<\s*sys/socket\.h\s*>",
+    ],
+}
+
+
 def _truncate(s: str, limit: int) -> str:
     if not s:
         return ""
@@ -41,7 +77,33 @@ def _safe_env() -> dict[str, str]:
             env[k] = v
     env.setdefault("LANG", "C")
     env.setdefault("LC_ALL", "C")
+    # Не наследуем прокси/пользовательские хосты, чтобы код не получил сетевые “подсказки” из окружения.
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ]:
+        env.pop(key, None)
     return env
+
+
+def _validate_payload(language: str, code: str, stdin: str) -> str | None:
+    if len(code or "") > MAX_SOURCE_CHARS:
+        return f"Код слишком большой: максимум {MAX_SOURCE_CHARS} символов."
+    if len(stdin or "") > MAX_STDIN_CHARS:
+        return f"Входные данные слишком большие: максимум {MAX_STDIN_CHARS} символов."
+
+    lang = _norm_lang(language)
+    patterns = _BLOCKED_PATTERNS.get(lang, [])
+    for pattern in patterns:
+        if re.search(pattern, code or "", flags=re.IGNORECASE | re.MULTILINE):
+            return "Код содержит потенциально опасные операции и отклонён политикой безопасности."
+    return None
 
 
 def _limit_resources_unix(memory_mb: int, cpu_s: int):
@@ -131,8 +193,8 @@ def compile_cpp(
             )
 
         # ограничим размер вывода, чтобы не раздувать ответ API
-        stdout = _truncate(proc.stdout or "", 20000)
-        stderr = _truncate(proc.stderr or "", 20000)
+        stdout = _truncate(proc.stdout or "", MAX_OUTPUT_CHARS)
+        stderr = _truncate(proc.stderr or "", MAX_OUTPUT_CHARS)
         compiled = proc.returncode == 0
         return CompileResult(
             compiled=compiled,
@@ -159,6 +221,12 @@ def run_cpp(
     - ограничение вывода
     - на Unix: лимиты CPU/памяти/размера файла
     """
+    payload_err = _validate_payload(language="cpp", code=code, stdin=stdin)
+    if payload_err:
+        cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
+        rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+        return cr, rr
+
     compiler_path = shutil.which(compiler) or shutil.which(f"{compiler}.exe")
     if not compiler_path:
         cr = CompileResult(
@@ -222,8 +290,8 @@ def run_cpp(
 
         cr = CompileResult(
             compiled=(compile_proc.returncode == 0),
-            stdout=_truncate(compile_proc.stdout or "", 20000),
-            stderr=_truncate(compile_proc.stderr or "", 20000),
+            stdout=_truncate(compile_proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(compile_proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=compile_proc.returncode,
             command=compile_cmd,
         )
@@ -267,8 +335,8 @@ def run_cpp(
 
         rr = RunResult(
             ran=True,
-            stdout=_truncate(run_proc.stdout or "", 20000),
-            stderr=_truncate(run_proc.stderr or "", 20000),
+            stdout=_truncate(run_proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(run_proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=run_proc.returncode,
             command=run_cmd,
         )
@@ -322,14 +390,20 @@ def compile_python(code: str, timeout_s: int = 5) -> CompileResult:
 
         return CompileResult(
             compiled=(proc.returncode == 0),
-            stdout=_truncate(proc.stdout or "", 20000),
-            stderr=_truncate(proc.stderr or "", 20000),
+            stdout=_truncate(proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=proc.returncode,
             command=cmd,
         )
 
 
 def run_python(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: int = 256) -> tuple[CompileResult, RunResult]:
+    payload_err = _validate_payload(language="python", code=code, stdin=stdin)
+    if payload_err:
+        cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
+        rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+        return cr, rr
+
     cr = compile_python(code=code, timeout_s=5)
     if not cr.compiled:
         return cr, RunResult(False, "", "", None, [])
@@ -344,7 +418,7 @@ def run_python(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: in
             return CompileResult(False, "", err, None, ["python"]), RunResult(False, "", "", None, [])
 
         preexec = _limit_resources_unix(memory_mb=memory_mb, cpu_s=run_timeout_s) if os.name != "nt" else None
-        cmd = [py, src]
+        cmd = [py, "-I", src]
         try:
             proc = subprocess.run(
                 cmd,
@@ -361,7 +435,7 @@ def run_python(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: in
         except OSError as e:
             return cr, RunResult(False, "", f"Не удалось запустить python: {e}", None, cmd)
 
-        return cr, RunResult(True, _truncate(proc.stdout or "", 20000), _truncate(proc.stderr or "", 20000), proc.returncode, cmd)
+        return cr, RunResult(True, _truncate(proc.stdout or "", MAX_OUTPUT_CHARS), _truncate(proc.stderr or "", MAX_OUTPUT_CHARS), proc.returncode, cmd)
 
 
 def compile_js(code: str, timeout_s: int = 5) -> CompileResult:
@@ -391,14 +465,20 @@ def compile_js(code: str, timeout_s: int = 5) -> CompileResult:
 
         return CompileResult(
             compiled=(proc.returncode == 0),
-            stdout=_truncate(proc.stdout or "", 20000),
-            stderr=_truncate(proc.stderr or "", 20000),
+            stdout=_truncate(proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=proc.returncode,
             command=cmd,
         )
 
 
 def run_js(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: int = 256) -> tuple[CompileResult, RunResult]:
+    payload_err = _validate_payload(language="js", code=code, stdin=stdin)
+    if payload_err:
+        cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
+        rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+        return cr, rr
+
     cr = compile_js(code=code, timeout_s=5)
     if not cr.compiled:
         return cr, RunResult(False, "", "", None, [])
@@ -430,7 +510,7 @@ def run_js(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: int = 
         except OSError as e:
             return cr, RunResult(False, "", f"Не удалось запустить node: {e}", None, cmd)
 
-        return cr, RunResult(True, _truncate(proc.stdout or "", 20000), _truncate(proc.stderr or "", 20000), proc.returncode, cmd)
+        return cr, RunResult(True, _truncate(proc.stdout or "", MAX_OUTPUT_CHARS), _truncate(proc.stderr or "", MAX_OUTPUT_CHARS), proc.returncode, cmd)
 
 
 def compile_java(code: str, timeout_s: int = 10) -> CompileResult:
@@ -460,14 +540,20 @@ def compile_java(code: str, timeout_s: int = 10) -> CompileResult:
 
         return CompileResult(
             compiled=(proc.returncode == 0),
-            stdout=_truncate(proc.stdout or "", 20000),
-            stderr=_truncate(proc.stderr or "", 20000),
+            stdout=_truncate(proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=proc.returncode,
             command=cmd,
         )
 
 
 def run_java(code: str, stdin: str = "", compile_timeout_s: int = 10, run_timeout_s: int = 2, memory_mb: int = 256) -> tuple[CompileResult, RunResult]:
+    payload_err = _validate_payload(language="java", code=code, stdin=stdin)
+    if payload_err:
+        cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
+        rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+        return cr, rr
+
     with tempfile.TemporaryDirectory(prefix="algo_java_run_") as tmp:
         src = os.path.join(tmp, "Main.java")
         with open(src, "w", encoding="utf-8", newline="\n") as f:
@@ -497,8 +583,8 @@ def run_java(code: str, stdin: str = "", compile_timeout_s: int = 10, run_timeou
 
         cr = CompileResult(
             compiled=(proc.returncode == 0),
-            stdout=_truncate(proc.stdout or "", 20000),
-            stderr=_truncate(proc.stderr or "", 20000),
+            stdout=_truncate(proc.stdout or "", MAX_OUTPUT_CHARS),
+            stderr=_truncate(proc.stderr or "", MAX_OUTPUT_CHARS),
             exit_code=proc.returncode,
             command=compile_cmd,
         )
@@ -527,7 +613,7 @@ def run_java(code: str, stdin: str = "", compile_timeout_s: int = 10, run_timeou
         except OSError as e:
             return cr, RunResult(False, "", f"Не удалось запустить java: {e}", None, run_cmd)
 
-        return cr, RunResult(True, _truncate(run_proc.stdout or "", 20000), _truncate(run_proc.stderr or "", 20000), run_proc.returncode, run_cmd)
+        return cr, RunResult(True, _truncate(run_proc.stdout or "", MAX_OUTPUT_CHARS), _truncate(run_proc.stderr or "", MAX_OUTPUT_CHARS), run_proc.returncode, run_cmd)
 
 
 def compile_code(language: str, code: str, compiler: str | None = None) -> CompileResult:

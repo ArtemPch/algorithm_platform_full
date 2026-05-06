@@ -63,13 +63,37 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'algorithm_service.wsgi.application'
 
-# ---- База данных (по умолчанию sqlite; для продакшена используйте env vars) ----
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+USE_POSTGRES = _env_bool("DB_USE_POSTGRES", False)
+
+# ---- База данных ----
+# По умолчанию остаётся sqlite для простого локального старта.
+# Для Postgres: выставьте DB_USE_POSTGRES=True и соответствующие DB_* переменные.
+if USE_POSTGRES:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "algorithm_platform"),
+            "USER": os.environ.get("DB_USER", "algorithm_user"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", "algorithm_password"),
+            "HOST": os.environ.get("DB_HOST", "localhost"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 # ---- Пароль и локаль ----
 AUTH_PASSWORD_VALIDATORS = [

@@ -1,4 +1,15 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: algorithm_platform
+      POSTGRES_USER: algorithm_user
+      POSTGRES_PASSWORD: algorithm_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build:
       context: ./backend
@@ -6,11 +17,19 @@ services:
     environment:
       DJANGO_DEBUG: "True"
       DJANGO_SECRET_KEY: "dev-secret-key"
+      DB_USE_POSTGRES: "True"
+      DB_NAME: "algorithm_platform"
+      DB_USER: "algorithm_user"
+      DB_PASSWORD: "algorithm_password"
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
       - backend_db:/app/db
+    depends_on:
+      - postgres
     command: ["sh", "-c", "sed -i 's/\\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh && /app/entrypoint.sh"]
 
   frontend:
@@ -28,5 +47,6 @@ services:
       - backend
 
 volumes:
+  postgres_data:
   backend_db:
   frontend_node_modules:
