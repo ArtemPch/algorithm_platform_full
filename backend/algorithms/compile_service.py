@@ -171,6 +171,109 @@ def run_cpp(
         rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
         return cr, rr
 
+    with tempfile.TemporaryDirectory(prefix="algo_run_") as tmp:
+        src_path = os.path.join(tmp, "main.cpp")
+        out_path = os.path.join(tmp, "main.exe" if os.name == "nt" else "main")
+
+        with open(src_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(code or "")
+
+        compile_cmd = [
+            compiler_path,
+            "-std=c++17",
+            "-O2",
+            src_path,
+            "-o",
+            out_path,
+        ]
+
+        compile_preexec = None
+        if os.name != "nt":
+            compile_preexec = _limit_resources_unix(memory_mb=memory_mb, cpu_s=compile_timeout_s)
+
+        try:
+            compile_proc = subprocess.run(
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=compile_timeout_s,
+                cwd=tmp,
+                env=_safe_env(),
+                preexec_fn=compile_preexec,
+            )
+        except subprocess.TimeoutExpired:
+            cr = CompileResult(
+                compiled=False,
+                stdout="",
+                stderr=f"Компиляция превысила лимит времени ({compile_timeout_s}с).",
+                exit_code=None,
+                command=compile_cmd,
+            )
+            return cr, RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+        except OSError as e:
+            cr = CompileResult(
+                compiled=False,
+                stdout="",
+                stderr=f"Не удалось запустить компилятор: {e}",
+                exit_code=None,
+                command=compile_cmd,
+            )
+            return cr, RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+
+        cr = CompileResult(
+            compiled=(compile_proc.returncode == 0),
+            stdout=_truncate(compile_proc.stdout or "", 20000),
+            stderr=_truncate(compile_proc.stderr or "", 20000),
+            exit_code=compile_proc.returncode,
+            command=compile_cmd,
+        )
+        if not cr.compiled:
+            return cr, RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
+
+        run_preexec = None
+        if os.name != "nt":
+            run_preexec = _limit_resources_unix(memory_mb=memory_mb, cpu_s=run_timeout_s)
+
+        run_cmd = [out_path]
+        try:
+            run_proc = subprocess.run(
+                run_cmd,
+                input=stdin or "",
+                capture_output=True,
+                text=True,
+                timeout=run_timeout_s,
+                cwd=tmp,
+                env=_safe_env(),
+                preexec_fn=run_preexec,
+            )
+        except subprocess.TimeoutExpired:
+            rr = RunResult(
+                ran=False,
+                stdout="",
+                stderr=f"Запуск превысил лимит времени ({run_timeout_s}с).",
+                exit_code=None,
+                command=run_cmd,
+            )
+            return cr, rr
+        except OSError as e:
+            rr = RunResult(
+                ran=False,
+                stdout="",
+                stderr=f"Не удалось запустить программу: {e}",
+                exit_code=None,
+                command=run_cmd,
+            )
+            return cr, rr
+
+        rr = RunResult(
+            ran=True,
+            stdout=_truncate(run_proc.stdout or "", 20000),
+            stderr=_truncate(run_proc.stderr or "", 20000),
+            exit_code=run_proc.returncode,
+            command=run_cmd,
+        )
+        return cr, rr
+
 
 def _norm_lang(language: str) -> str:
     lang = (language or "").strip().lower()
