@@ -75,7 +75,7 @@ class AlgorithmForm(QDialog):
         
         lang_label = QLabel("Язык программирования:")
         self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["Python", "JavaScript", "Java", "C++", "C#", "Other"])
+        self.lang_combo.addItems(["Python", "Java", "C++", "C#", "Other"])
         code_toolbar.addWidget(lang_label)
         code_toolbar.addWidget(self.lang_combo)
         code_toolbar.addStretch()

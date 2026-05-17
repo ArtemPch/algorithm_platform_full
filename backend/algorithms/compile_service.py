@@ -40,13 +40,6 @@ _BLOCKED_PATTERNS: dict[str, list[str]] = {
         r"\bfrom\s+ctypes\s+import\b",
         r"\bos\.system\s*\(",
     ],
-    "js": [
-        r"\brequire\s*\(\s*['\"]child_process['\"]\s*\)",
-        r"\bimport\s+.*\s+from\s+['\"]child_process['\"]",
-        r"\brequire\s*\(\s*['\"]net['\"]\s*\)",
-        r"\brequire\s*\(\s*['\"]http['\"]\s*\)",
-        r"\brequire\s*\(\s*['\"]https['\"]\s*\)",
-    ],
     "java": [
         r"\bRuntime\.getRuntime\s*\(",
         r"\bProcessBuilder\s*\(",
@@ -351,11 +344,20 @@ def _norm_lang(language: str) -> str:
         return "cpp"
     if lang in ["python", "py"]:
         return "python"
-    if lang in ["javascript", "js", "node"]:
-        return "js"
     if lang in ["java"]:
         return "java"
     return lang
+
+
+def _validate_java_class_name(code: str) -> str | None:
+    match = re.search(r"public\s+class\s+(\w+)", code or "")
+    if match and match.group(1) != "Main":
+        name = match.group(1)
+        return (
+            f'Публичный класс должен называться Main (файл Main.java), а не {name}. '
+            "Переименуйте класс в Main или уберите модификатор public."
+        )
+    return None
 
 
 def _which_or_err(bin_name: str, err_label: str) -> tuple[str | None, str | None]:
@@ -440,82 +442,11 @@ def run_python(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: in
         return cr, RunResult(True, _truncate(proc.stdout or "", MAX_OUTPUT_CHARS), _truncate(proc.stderr or "", MAX_OUTPUT_CHARS), proc.returncode, cmd)
 
 
-def compile_js(code: str, timeout_s: int = 5) -> CompileResult:
-    with tempfile.TemporaryDirectory(prefix="algo_js_compile_") as tmp:
-        src = os.path.join(tmp, "main.js")
-        with open(src, "w", encoding="utf-8", newline="\n") as f:
-            f.write(code or "")
-
-        node, err = _which_or_err("node", 'Интерпретатор')
-        if err:
-            return CompileResult(False, "", err, None, ["node"])
-
-        cmd = [node, "--check", src]
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                cwd=tmp,
-                env=_safe_env(),
-            )
-        except subprocess.TimeoutExpired:
-            return CompileResult(False, "", f"Проверка синтаксиса превысила лимит ({timeout_s}с).", None, cmd)
-        except OSError as e:
-            return CompileResult(False, "", f"Не удалось запустить node: {e}", None, cmd)
-
-        return CompileResult(
-            compiled=(proc.returncode == 0),
-            stdout=_truncate(proc.stdout or "", MAX_OUTPUT_CHARS),
-            stderr=_truncate(proc.stderr or "", MAX_OUTPUT_CHARS),
-            exit_code=proc.returncode,
-            command=cmd,
-        )
-
-
-def run_js(code: str, stdin: str = "", run_timeout_s: int = 2, memory_mb: int = 256) -> tuple[CompileResult, RunResult]:
-    payload_err = _validate_payload(language="js", code=code, stdin=stdin)
-    if payload_err:
-        cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
-        rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
-        return cr, rr
-
-    cr = compile_js(code=code, timeout_s=5)
-    if not cr.compiled:
-        return cr, RunResult(False, "", "", None, [])
-
-    with tempfile.TemporaryDirectory(prefix="algo_js_run_") as tmp:
-        src = os.path.join(tmp, "main.js")
-        with open(src, "w", encoding="utf-8", newline="\n") as f:
-            f.write(code or "")
-
-        node, err = _which_or_err("node", 'Интерпретатор')
-        if err:
-            return CompileResult(False, "", err, None, ["node"]), RunResult(False, "", "", None, [])
-
-        preexec = _limit_resources_unix(memory_mb=memory_mb, cpu_s=run_timeout_s) if os.name != "nt" else None
-        cmd = [node, src]
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=stdin or "",
-                capture_output=True,
-                text=True,
-                timeout=run_timeout_s,
-                cwd=tmp,
-                env=_safe_env(),
-                preexec_fn=preexec,
-            )
-        except subprocess.TimeoutExpired:
-            return cr, RunResult(False, "", f"Запуск превысил лимит времени ({run_timeout_s}с).", None, cmd)
-        except OSError as e:
-            return cr, RunResult(False, "", f"Не удалось запустить node: {e}", None, cmd)
-
-        return cr, RunResult(True, _truncate(proc.stdout or "", MAX_OUTPUT_CHARS), _truncate(proc.stderr or "", MAX_OUTPUT_CHARS), proc.returncode, cmd)
-
-
 def compile_java(code: str, timeout_s: int = 10) -> CompileResult:
+    class_err = _validate_java_class_name(code)
+    if class_err:
+        return CompileResult(False, "", class_err, None, ["javac"])
+
     with tempfile.TemporaryDirectory(prefix="algo_java_compile_") as tmp:
         src = os.path.join(tmp, "Main.java")
         with open(src, "w", encoding="utf-8", newline="\n") as f:
@@ -555,6 +486,11 @@ def run_java(code: str, stdin: str = "", compile_timeout_s: int = 10, run_timeou
         cr = CompileResult(compiled=False, stdout="", stderr=payload_err, exit_code=None, command=[])
         rr = RunResult(ran=False, stdout="", stderr="", exit_code=None, command=[])
         return cr, rr
+
+    class_err = _validate_java_class_name(code)
+    if class_err:
+        cr = CompileResult(compiled=False, stdout="", stderr=class_err, exit_code=None, command=[])
+        return cr, RunResult(False, "", "", None, [])
 
     with tempfile.TemporaryDirectory(prefix="algo_java_run_") as tmp:
         src = os.path.join(tmp, "Main.java")
@@ -624,8 +560,6 @@ def compile_code(language: str, code: str, compiler: str | None = None) -> Compi
         return compile_cpp(code=code, compiler=compiler or "g++", timeout_s=10)
     if lang == "python":
         return compile_python(code=code, timeout_s=5)
-    if lang == "js":
-        return compile_js(code=code, timeout_s=5)
     if lang == "java":
         return compile_java(code=code, timeout_s=10)
     return CompileResult(False, "", f"Язык не поддерживается: {language}", None, [])
@@ -652,8 +586,6 @@ def run_code(
         )
     if lang == "python":
         return run_python(code=code, stdin=stdin, run_timeout_s=run_timeout_s, memory_mb=memory_mb)
-    if lang == "js":
-        return run_js(code=code, stdin=stdin, run_timeout_s=run_timeout_s, memory_mb=memory_mb)
     if lang == "java":
         return run_java(
             code=code,

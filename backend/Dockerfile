@@ -5,9 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# System deps for compilation/runtimes (C++/Java/Node)
+# System deps for compilation/runtimes (C++/Java/Python)
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends g++ build-essential nodejs npm default-jdk-headless \
+  && apt-get install -y --no-install-recommends g++ build-essential default-jdk-headless \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt

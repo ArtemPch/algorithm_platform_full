@@ -139,7 +139,6 @@ const Home: React.FC = () => {
                 <option value="all">Все языки</option>
                 <option value="C++">C/C++</option>
                 <option value="Python">Python</option>
-                <option value="JavaScript">JavaScript</option>
                 <option value="Java">Java</option>
               </select>
             </div>
